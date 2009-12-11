@@ -1,0 +1,18 @@
+Hi!
+
+You have just downloaded the source for various example engines I've created
+for demo purposes of the storage engine API in memcached.
+
+C++
+===
+
+I know that a lot of people dislike C, and would prefer to use C++ to
+create their engine. To show you how to write an engine in C++, I decided
+to create a small engine using STL containers to store the objects in.
+You'll find this implementation in src/stl
+
+Hope you will find the example(s) interesting.
+
+Cheers,
+
+Trond Norbye
