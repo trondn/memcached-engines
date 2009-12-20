@@ -11,7 +11,17 @@ create their engine. To show you how to write an engine in C++, I decided
 to create a small engine using STL containers to store the objects in.
 You'll find this implementation in src/stl
 
-Hope you will find the example(s) interesting.
+Persistent
+==========
+
+People always talk about a persistent cache, so I thought I could
+write up a small example where I just tweaked the default engine from
+the memcached source distribution to store it's data in a database
+(sqlite). That means that items.[ch] assoc.[ch] slabs.[ch] is copied from
+the source distribution, and persistent_engine.[ch] is almost identical
+to default_engine.[ch].
+
+Hope you will find the examples interesting.
 
 Cheers,
 

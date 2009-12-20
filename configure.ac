@@ -18,6 +18,8 @@ AC_CHECK_HEADERS([memcached/engine.h])
 AS_IF([test "x$ac_cv_header_memcached_engine_h" = "xno"],
       [AC_MSG_ERROR([You need to install the engine interface to build engines])])
 
+PANDORA_HAVE_LIBSQLITE3
+
 AS_IF([test "x$SUNCC" = "xyes"],
       [
         CPPFLAGS="-xldscope=hidden $CPPFLAGS"
