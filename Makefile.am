@@ -6,10 +6,10 @@ if HAVE_LIBSQLITE3
 lib_LTLIBRARIES += persistent_engine.la
 endif
 
-stl_engine_la_LDFLAGS = -module -dynamic ${LIBSQLITE3}
+stl_engine_la_LDFLAGS = -module -dynamic
 stl_engine_la_SOURCES = src/stl/stl_engine.cc src/stl/stl_engine.h
 
-persistent_engine_la_LDFLAGS = -module -dynamic -lsqlite3
+persistent_engine_la_LDFLAGS = -module -dynamic ${LIBSQLITE3}
 persistent_engine_la_SOURCES = \
                  src/persistent/assoc.c src/persistent/assoc.h \
                  src/persistent/items.c src/persistent/items.h \
