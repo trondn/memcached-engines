@@ -4,7 +4,7 @@
 #
 # Use and distribution licensed under the BSD license.  See
 # the COPYING file in this directory for full text.
-AC_PREREQ(2.63)
+AC_PREREQ(2.61)
 m4_include([m4/version.m4])
 AC_INIT(sqlengine, VERSION_NUMBER, trond.norbye@gmail.com)
 AC_CONFIG_SRCDIR([src])
@@ -19,6 +19,7 @@ AS_IF([test "x$ac_cv_header_memcached_engine_h" = "xno"],
       [AC_MSG_ERROR([You need to install the engine interface to build engines])])
 
 PANDORA_HAVE_LIBSQLITE3
+PANDORA_HAVE_LIBZ
 
 AS_IF([test "x$SUNCC" = "xyes"],
       [

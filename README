@@ -21,6 +21,13 @@ the memcached source distribution to store it's data in a database
 the source distribution, and persistent_engine.[ch] is almost identical
 to default_engine.[ch].
 
+Compress
+========
+
+An engine that compress the items it stores. This is based on default
+engine with only a small modification. Please note that append/prepend
+and incr/decr will most likely not work ;-)
+
 Hope you will find the examples interesting.
 
 Cheers,
