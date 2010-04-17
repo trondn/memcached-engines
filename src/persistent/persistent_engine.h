@@ -75,6 +75,7 @@ struct engine_stats {
     uint64_t curr_bytes;
     uint64_t curr_items;
     uint64_t total_items;
+    uint64_t reclaimed;
 };
 
 /**
@@ -111,11 +112,11 @@ struct persistent_engine {
     struct engine_stats stats;
 };
 
-char* item_get_data(const item* item);
-const char* item_get_key(const item* item);
-void item_set_cas(item* item, uint64_t val);
-uint64_t item_get_cas(const item* item);
-uint8_t item_get_clsid(const item* item);
+char* item_get_data(const hash_item* item);
+const char* item_get_key(const hash_item* item);
+void item_set_cas(ENGINE_HANDLE *handle, item* item, uint64_t val);
+uint64_t item_get_cas(const hash_item* item);
+uint8_t item_get_clsid(const hash_item* item);
 
 #ifdef __cplusplus
 }

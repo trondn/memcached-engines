@@ -36,7 +36,4 @@ int assoc_insert(struct persistent_engine *engine, uint32_t hash,
                  hash_item *item);
 void assoc_delete(struct persistent_engine *engine, uint32_t hash,
                   const char *key, const size_t nkey);
-int start_assoc_maintenance_thread(struct persistent_engine *engine);
-void stop_assoc_maintenance_thread(struct persistent_engine *engine);
-
 #endif

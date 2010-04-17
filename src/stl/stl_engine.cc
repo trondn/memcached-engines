@@ -29,7 +29,7 @@ extern "C" {
         SERVER_HANDLE_V1 *api;
 
         if (interface != 1 ||
-            (api = static_cast<SERVER_HANDLE_V1 *>(get_server_api(1))) == NULL) {
+            (api = static_cast<SERVER_HANDLE_V1 *>(get_server_api(server_handle_v1))) == NULL) {
             return ENGINE_ENOTSUP;
         }
 
@@ -45,9 +45,11 @@ extern "C" {
  * static member functions, but that made the C++ compiler spit out warnings :(
  */
 extern "C" {
-    static const char* stl_get_info(ENGINE_HANDLE* handle)
+    static const engine_info *stl_get_info(ENGINE_HANDLE* handle)
     {
-        return (reinterpret_cast<STLEngine*>(handle))->Version().c_str();
+        static engine_info info;
+        info.description = (reinterpret_cast<STLEngine*>(handle))->Version().c_str();
+        return &info;
     }
 
     static ENGINE_ERROR_CODE stl_initialize(ENGINE_HANDLE* handle, const char* config)
@@ -81,9 +83,11 @@ extern "C" {
 
     static ENGINE_ERROR_CODE stl_remove(ENGINE_HANDLE* handle,
                                         const void* cookie,
-                                        item* item)
+                                        const void* key,
+                                        const size_t nkey,
+                                        uint64_t cas)
     {
-        return reinterpret_cast<STLEngine*>(handle)->Remove(cookie, item);
+        return reinterpret_cast<STLEngine*>(handle)->Remove(cookie, key, nkey, cas);
     }
 
     static void stl_release(ENGINE_HANDLE* handle, const void *cookie,
@@ -145,40 +149,16 @@ extern "C" {
         return reinterpret_cast<STLEngine*>(handle)->ResetStats(cookie);
     }
 
-    static ENGINE_ERROR_CODE stl_unknown_command(ENGINE_HANDLE* handle,
-                                                 const void* cookie,
-                                                 protocol_binary_request_header *request,
-                                                 ADD_RESPONSE response)
+    static bool stl_get_item_info(ENGINE_HANDLE *handle, const item* item, item_info *item_info)
     {
-        return reinterpret_cast<STLEngine*>(handle)->Unknown(cookie, request, response);
+        return reinterpret_cast<STLEngine*>(handle)->getItemInfo(reinterpret_cast<const Item*>(item),
+                                                                 item_info);
     }
 
-    static uint64_t stl_item_get_cas(const item *item)
+    static void stl_item_set_cas(ENGINE_HANDLE *handle, item *item, uint64_t cas)
     {
-        return reinterpret_cast<const Item*>(item)->getCas();
-        ;
-    }
-
-    static void stl_item_set_cas(item *item, uint64_t cas)
-    {
+        (void)handle;
         reinterpret_cast<Item*>(item)->setCas(cas);
-    }
-
-    static const char* stl_item_get_key(const item *item)
-    {
-        return reinterpret_cast<const Item*>(item)->getKey();
-    }
-
-
-    static char* stl_item_get_data(const item *itm)
-    {
-        item *it = const_cast<item*>(itm);
-        return reinterpret_cast<Item*>(it)->getValue();
-    }
-
-    static uint8_t stl_item_get_clsid(const item* item)
-    {
-        return 0;
     }
 }
 
@@ -215,7 +195,7 @@ pthread_mutex_t CacheLock::mutex = PTHREAD_MUTEX_INITIALIZER;
  */
 
 STLEngine::STLEngine(SERVER_HANDLE_V1 *api) :
-    server(api)
+    server(api), cache()
 {
     interface.interface = 1;
     get_info = stl_get_info;
@@ -230,12 +210,8 @@ STLEngine::STLEngine(SERVER_HANDLE_V1 *api) :
     flush = stl_flush;
     get_stats= stl_get_stats;
     reset_stats = stl_reset_stats;
-    unknown_command = stl_unknown_command;
-    item_get_cas = stl_item_get_cas;
     item_set_cas = stl_item_set_cas;
-    item_get_key = stl_item_get_key;
-    item_get_data = stl_item_get_data;
-    item_get_clsid = stl_item_get_clsid;
+    get_item_info = stl_get_item_info;
 }
 
 const std::string STLEngine::Version() const
@@ -245,6 +221,7 @@ const std::string STLEngine::Version() const
 
 ENGINE_ERROR_CODE STLEngine::Initialize(const char* config)
 {
+    (void)config;
     return ENGINE_SUCCESS;
 }
 
@@ -256,20 +233,26 @@ ENGINE_ERROR_CODE STLEngine::Allocate(const void* cookie,
                                       const int flags,
                                       const rel_time_t exptime)
 {
+    (void)cookie;
     *itm = reinterpret_cast<item*>(new Item(key, nkey, nbytes, flags, exptime));
     return ENGINE_SUCCESS;
 }
 
-ENGINE_ERROR_CODE STLEngine::Remove(const void* cookie, item* item)
+ENGINE_ERROR_CODE STLEngine::Remove(const void* cookie, const void *key,
+                                    const size_t nkey,
+                                    uint64_t cas)
 {
+    (void)cookie;
     CacheLock lock;
-    Item *it = reinterpret_cast<Item*>(item);
-
-    std::map<std::string, Item*>::iterator iter = cache.find(it->key);
+    std::string it(static_cast<const char*>(key), nkey);
+    std::map<std::string, Item*>::iterator iter = cache.find(it);
     if (iter != cache.end()) {
-        delete iter->second;
-        cache.erase(iter);
-        return ENGINE_SUCCESS;
+        if (cas == iter->second->cas) {
+            delete iter->second;
+            cache.erase(iter);
+            return ENGINE_SUCCESS;
+        }
+        return ENGINE_KEY_EEXISTS;
     } else {
         return ENGINE_KEY_ENOENT;
     }
@@ -277,6 +260,7 @@ ENGINE_ERROR_CODE STLEngine::Remove(const void* cookie, item* item)
 
 void STLEngine::Release(const void *cookie, item* item)
 {
+    (void)cookie;
     Item *it = reinterpret_cast<Item*>(item);
     delete it;
 }
@@ -285,6 +269,7 @@ ENGINE_ERROR_CODE STLEngine::Get(const void* cookie, item** pIt,
                                  const void* key,
                                  const int nkey)
 {
+    (void)cookie;
     std::string k(static_cast<const char*>(key), nkey);
     CacheLock lock;
 
@@ -303,6 +288,7 @@ ENGINE_ERROR_CODE STLEngine::Store(const void *cookie,
                                    uint64_t *cas,
                                    ENGINE_STORE_OPERATION operation)
 {
+    (void)cookie;
     CacheLock lock;
     Item *it = reinterpret_cast<Item*>(item);
 
@@ -337,6 +323,7 @@ ENGINE_ERROR_CODE STLEngine::Store(const void *cookie,
     delete iter->second;
     cache.erase(iter);
     cache[it->key] = it->clone();
+    *cas = it->cas;
     return ENGINE_SUCCESS;
 }
 
@@ -351,11 +338,14 @@ ENGINE_ERROR_CODE STLEngine::Arithmetic(const void* cookie,
                                         uint64_t *cas,
                                         uint64_t *result)
 {
+    (void)cookie; (void)key; (void)nkey; (void)increment; (void)create;
+    (void)delta; (void)initial; (void)exptime; (void)cas; (void)result;
     return ENGINE_ENOTSUP;
 }
 
 ENGINE_ERROR_CODE STLEngine::Flush(const void* cookie, time_t when)
 {
+    (void)cookie;
     if (when != 0) {
         return ENGINE_ENOTSUP;
     }
@@ -372,16 +362,11 @@ ENGINE_ERROR_CODE STLEngine::GetStats(const void* cookie,
                                       ADD_STAT add_stat)
 {
     // We don't have any stats ;-)
+    (void)cookie; (void)stat_key; (void)nkey; (void)add_stat;
     return ENGINE_SUCCESS;
 }
 
 void STLEngine::ResetStats(const void *cookie)
 {
-}
-
-ENGINE_ERROR_CODE STLEngine::Unknown(const void* cookie,
-                                     protocol_binary_request_header *request,
-                                     ADD_RESPONSE response)
-{
-    return ENGINE_ENOTSUP;
+    (void)cookie;
 }

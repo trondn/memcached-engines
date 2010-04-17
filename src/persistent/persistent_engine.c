@@ -17,7 +17,7 @@
 #include "persistent_engine.h"
 #include "memcached/config_parser.h"
 
-static const char* persistent_get_info(ENGINE_HANDLE* handle);
+static const engine_info* persistent_get_info(ENGINE_HANDLE* handle);
 static ENGINE_ERROR_CODE persistent_initialize(ENGINE_HANDLE* handle,
                                                const char* config_str);
 static void persistent_destroy(ENGINE_HANDLE* handle);
@@ -31,7 +31,9 @@ static ENGINE_ERROR_CODE persistent_item_allocate(ENGINE_HANDLE* handle,
                                                   const rel_time_t exptime);
 static ENGINE_ERROR_CODE persistent_item_delete(ENGINE_HANDLE* handle,
                                                 const void* cookie,
-                                                item* item);
+                                                const void* key,
+                                                const size_t nkey,
+                                                uint64_t cas);
 static void persistent_item_release(ENGINE_HANDLE* handle, const void *cookie,
                                     item* item);
 static ENGINE_ERROR_CODE persistent_get(ENGINE_HANDLE* handle,
@@ -71,6 +73,9 @@ static ENGINE_ERROR_CODE persistent_unknown_command(ENGINE_HANDLE* handle,
                                                     protocol_binary_request_header *request,
                                                     ADD_RESPONSE response);
 
+static bool get_item_info(ENGINE_HANDLE *handle, const item* item, item_info *item_info);
+
+
 ENGINE_ERROR_CODE create_instance(uint64_t interface,
                                   GET_SERVER_API get_server_api,
                                   ENGINE_HANDLE **handle) {
@@ -102,11 +107,8 @@ ENGINE_ERROR_CODE create_instance(uint64_t interface,
             .arithmetic = persistent_arithmetic,
             .flush = persistent_flush,
             .unknown_command = persistent_unknown_command,
-            .item_get_cas = item_get_cas,
             .item_set_cas = item_set_cas,
-            .item_get_key = item_get_key,
-            .item_get_data = item_get_data,
-            .item_get_clsid = item_get_clsid
+            .get_item_info = get_item_info
         },
         .server = *api,
         .initialized = true,
@@ -147,13 +149,27 @@ static inline struct persistent_engine* get_handle(ENGINE_HANDLE* handle) {
 }
 
 static inline hash_item* get_real_item(item* item) {
-    hash_item it;
-    ptrdiff_t offset = (caddr_t)&it.item - (caddr_t)&it;
-    return (hash_item*) (((caddr_t) item) - (offset));
+    return (hash_item*)item;
 }
 
-static const char* persistent_get_info(ENGINE_HANDLE* handle) {
-    return "persistence engine v0.1";
+static const engine_info* persistent_get_info(ENGINE_HANDLE* handle) {
+    static union {
+        engine_info engine_info;
+        char buffer[sizeof(engine_info) + (sizeof(feature_info) * 10)];
+    } info = {
+        .engine_info = {
+            .description = "Persistent engine v0.1",
+            .num_features = 3,
+            .features = {
+                [0].feature = ENGINE_FEATURE_LRU
+            }
+        }
+    };
+
+    info.engine_info.features[1].feature = ENGINE_FEATURE_PERSISTENT_STORAGE;
+    info.engine_info.features[2].feature = ENGINE_FEATURE_CAS;
+
+    return &info;
 }
 
 static ENGINE_ERROR_CODE persistent_initialize(ENGINE_HANDLE* handle,
@@ -213,10 +229,10 @@ static ENGINE_ERROR_CODE persistent_item_allocate(ENGINE_HANDLE* handle,
     }
 
     hash_item *it;
-    it = item_alloc(engine, key, nkey, flags, exptime, nbytes);
+    it = item_alloc(engine, key, nkey, flags, exptime, nbytes, cookie);
 
     if (it != NULL) {
-        *item = &it->item;
+        *item = (void*)it;
         return ENGINE_SUCCESS;
     } else {
         return ENGINE_ENOMEM;
@@ -225,8 +241,15 @@ static ENGINE_ERROR_CODE persistent_item_allocate(ENGINE_HANDLE* handle,
 
 static ENGINE_ERROR_CODE persistent_item_delete(ENGINE_HANDLE* handle,
                                                 const void* cookie,
-                                                item* item) {
-    item_unlink(get_handle(handle), get_real_item(item));
+                                                const void* key,
+                                                const size_t nkey,
+                                                uint64_t cas) {
+
+    item* it;
+    if (persistent_get(handle, cookie, &it, key, nkey) == ENGINE_SUCCESS) {
+        item_unlink(get_handle(handle), get_real_item(it));
+        item_release(get_handle(handle), get_real_item(it));
+    }
     return ENGINE_SUCCESS;
 }
 
@@ -244,7 +267,7 @@ static ENGINE_ERROR_CODE persistent_get(ENGINE_HANDLE* handle,
     struct persistent_engine* engine = get_handle(handle);
     hash_item *it = item_get(engine, key, nkey);
     if (it != NULL) {
-        *item = &it->item;
+        *item = (void*)it;
         return ENGINE_SUCCESS;
     } else {
         sqlite_io_get_item(engine, cookie, key, nkey);
@@ -294,7 +317,7 @@ static ENGINE_ERROR_CODE persistent_store(ENGINE_HANDLE* handle,
                                           uint64_t *cas,
                                           ENGINE_STORE_OPERATION operation) {
     return store_item(get_handle(handle), get_real_item(item), cas, operation,
-                      true);
+                      true, cookie);
 }
 
 static ENGINE_ERROR_CODE persistent_arithmetic(ENGINE_HANDLE* handle,
@@ -320,13 +343,13 @@ static ENGINE_ERROR_CODE persistent_arithmetic(ENGINE_HANDLE* handle,
             int len = snprintf(buffer, sizeof(buffer), "%llu\r\n",
                                (unsigned long long)initial);
 
-            item = item_alloc(engine, key, nkey, 0, exptime, len);
+            item = item_alloc(engine, key, nkey, 0, exptime, len, cookie);
             if (item == NULL) {
                 return ENGINE_ENOMEM;
             }
-            memcpy((void*)item_get_data(&item->item), buffer, len);
-            if ((ret = store_item(engine, item, cas,
-                                  OPERATION_ADD, true)) == ENGINE_KEY_EEXISTS) {
+            memcpy((void*)item_get_data(item), buffer, len);
+            if ((ret = store_item(engine, item, cas, OPERATION_ADD, true,
+                                  cookie)) == ENGINE_KEY_EEXISTS) {
                 item_release(engine, item);
                 return persistent_arithmetic(handle, cookie, key, nkey, increment,
                                              create, delta, initial, exptime, cas,
@@ -334,11 +357,11 @@ static ENGINE_ERROR_CODE persistent_arithmetic(ENGINE_HANDLE* handle,
             }
 
             *result = initial;
-            *cas = item_get_cas(&item->item);
+            *cas = item_get_cas(item);
             item_release(engine, item);
         }
     } else {
-        ret = add_delta(engine, item, increment, delta, cas, result);
+        ret = add_delta(engine, item, increment, delta, cas, result, cookie);
         item_release(engine, item);
     }
 
@@ -425,7 +448,7 @@ static ENGINE_ERROR_CODE persistent_unknown_command(ENGINE_HANDLE* handle,
 }
 
 
-uint64_t item_get_cas(const item* item)
+uint64_t item_get_cas(const hash_item* item)
 {
     if (item->iflag & ITEM_WITH_CAS) {
         return *(uint64_t*)(item + 1);
@@ -433,14 +456,15 @@ uint64_t item_get_cas(const item* item)
     return 0;
 }
 
-void item_set_cas(item* item, uint64_t val)
+void item_set_cas(ENGINE_HANDLE* handle, item* item, uint64_t val)
 {
-    if (item->iflag & ITEM_WITH_CAS) {
-        *(uint64_t*)(item + 1) = val;
+    hash_item *it = get_real_item(item);
+    if (it->iflag & ITEM_WITH_CAS) {
+        *(uint64_t*)(it + 1) = val;
     }
 }
 
-const char* item_get_key(const item* item)
+const char* item_get_key(const hash_item* item)
 {
     char *ret = (void*)(item + 1);
     if (item->iflag & ITEM_WITH_CAS) {
@@ -450,14 +474,31 @@ const char* item_get_key(const item* item)
     return ret;
 }
 
-char* item_get_data(const item* item)
+char* item_get_data(const hash_item* item)
 {
     return ((char*)item_get_key(item)) + item->nkey;
 }
 
-uint8_t item_get_clsid(const item* item)
+uint8_t item_get_clsid(const hash_item* item)
 {
     return 0;
 }
 
-
+static bool get_item_info(ENGINE_HANDLE *handle, const item* item, item_info *item_info)
+{
+    hash_item* it = (hash_item*)item;
+    if (item_info->nvalue < 1) {
+        return false;
+    }
+    item_info->cas = item_get_cas(it);
+    item_info->exptime = it->exptime;
+    item_info->nbytes = it->nbytes;
+    item_info->flags = it->flags;
+    item_info->clsid = it->slabs_clsid;
+    item_info->nkey = it->nkey;
+    item_info->nvalue = 1;
+    item_info->key = item_get_key(it);
+    item_info->value[0].iov_base = item_get_data(it);
+    item_info->value[0].iov_len = it->nbytes;
+    return true;
+}

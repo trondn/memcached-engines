@@ -3,12 +3,15 @@
  * Hash table
  *
  */
+#ifndef __WIN32__
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/signal.h>
 #include <sys/resource.h>
-#include <fcntl.h>
 #include <netinet/in.h>
+#endif
+
+#include <fcntl.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -41,7 +44,7 @@ hash_item *assoc_find(struct persistent_engine *engine, uint32_t hash, const cha
     hash_item *ret = NULL;
     int depth = 0;
     while (it) {
-        if ((nkey == it->item.nkey) && (memcmp(key, item_get_key(&it->item), nkey) == 0)) {
+        if ((nkey == it->nkey) && (memcmp(key, item_get_key(it), nkey) == 0)) {
             ret = it;
             break;
         }
@@ -69,7 +72,7 @@ static hash_item** _hashitem_before(struct persistent_engine *engine,
         pos = &engine->assoc.primary_hashtable[hash & hashmask(engine->assoc.hashpower)];
     }
 
-    while (*pos && ((nkey != (*pos)->item.nkey) || memcmp(key, item_get_key(&(*pos)->item), nkey))) {
+    while (*pos && ((nkey != (*pos)->nkey) || memcmp(key, item_get_key(*pos), nkey))) {
         pos = &(*pos)->h_next;
     }
     return pos;
@@ -108,7 +111,7 @@ static void assoc_expand(struct persistent_engine *engine) {
 int assoc_insert(struct persistent_engine *engine, uint32_t hash, hash_item *it) {
     unsigned int oldbucket;
 
-    assert(assoc_find(engine, hash, item_get_key(&it->item), it->item.nkey) == 0);  /* shouldn't have duplicately named things defined */
+    assert(assoc_find(engine, hash, item_get_key(it), it->nkey) == 0);  /* shouldn't have duplicately named things defined */
 
     if (engine->assoc.expanding &&
         (oldbucket = (hash & hashmask(engine->assoc.hashpower - 1))) >= engine->assoc.expand_bucket)
@@ -167,7 +170,7 @@ static void *assoc_maintenance_thread(void *arg) {
                  NULL != it; it = next) {
                 next = it->h_next;
 
-                bucket = engine->server.hash(item_get_key(&it->item), it->item.nkey, 0) & hashmask(engine->assoc.hashpower);
+                bucket = engine->server.hash(item_get_key(it), it->nkey, 0) & hashmask(engine->assoc.hashpower);
                 it->h_next = engine->assoc.primary_hashtable[bucket];
                 engine->assoc.primary_hashtable[bucket] = it;
             }

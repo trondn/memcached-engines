@@ -148,7 +148,7 @@ public:
     }
 
     void enqueue(hash_item* item) {
-        std::string key(item_get_key(&item->itm), item->itm.nkey);
+        std::string key(item_get_key(item), item->nkey);
         ++item->refcount;
 
         lock();
@@ -156,7 +156,7 @@ public:
         if (iter != queue.end()) {
             /* don't store the previous entry! */
             engine->engine.release(reinterpret_cast<ENGINE_HANDLE*>(&engine->engine),
-                                   NULL, &iter->second->itm);
+                                   NULL, iter->second);
             queue.erase(iter);
         }
         queue[key] = item;
@@ -172,13 +172,13 @@ private:
             abort();
         }
 
-        sqlite3_bind_text(statement, 1,item_get_key(&it->itm),
-                          it->itm.nkey, SQLITE_STATIC);
-        sqlite3_bind_int(statement, 2, it->itm.flags);
-        sqlite3_bind_int(statement, 3, it->itm.exptime);
+        sqlite3_bind_text(statement, 1,item_get_key(it),
+                          it->nkey, SQLITE_STATIC);
+        sqlite3_bind_int(statement, 2, it->flags);
+        sqlite3_bind_int(statement, 3, it->exptime);
         sqlite3_bind_int(statement, 4, 0);
-        sqlite3_bind_blob(statement, 5, item_get_data(&it->itm),
-                          it->itm.nbytes, SQLITE_STATIC);
+        sqlite3_bind_blob(statement, 5, item_get_data(it),
+                          it->nbytes, SQLITE_STATIC);
 
         int rc = 0;
         bool retry;
@@ -217,7 +217,7 @@ private:
                 unlock();
                 storeItem(item);
                 engine->engine.release(reinterpret_cast<ENGINE_HANDLE*>(&engine->engine),
-                                       NULL, &item->itm);
+                                       NULL, item);
                 lock();
             }
         }
@@ -229,9 +229,7 @@ private:
 
 
 static inline hash_item* get_real_item(item* itm) {
-    hash_item it;
-    ptrdiff_t offset = (caddr_t)&it.itm - (caddr_t)&it;
-    return (hash_item*) (((caddr_t) itm) - (offset));
+    return (hash_item*)itm;
 }
 
 class SQLiteReader : public SQLite {
@@ -285,10 +283,10 @@ protected:
                                     sqlite3_column_int(statement, flagoffset + 1));
         if (r == ENGINE_SUCCESS) {
             hash_item *itm = get_real_item(it);
-            memcpy(item_get_data(&itm->itm),
+            memcpy(item_get_data(itm),
                    sqlite3_column_text(statement, flagoffset + 2), nbytes);
             uint64_t cas;
-            store_item(engine, itm, &cas, OPERATION_ADD, false);
+            store_item(engine, itm, &cas, OPERATION_ADD, false, NULL);
             return true;
 
         }
@@ -408,9 +406,11 @@ private:
     }
 };
 
-extern "C" static void *thread_entry(void *arg) {
-    SQLite::run(static_cast<SQLite *>(arg));
-    return NULL;
+extern "C" {
+    static void *thread_entry(void *arg) {
+        SQLite::run(static_cast<SQLite *>(arg));
+        return NULL;
+    }
 }
 
 ENGINE_ERROR_CODE sqlite_io_start_threads(struct persistent_engine *engine)

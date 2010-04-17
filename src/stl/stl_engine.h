@@ -27,7 +27,7 @@ class STLEngine;
 /**
  * Holder class for each item
  */
-class Item : public item {
+class Item {
 public:
     /**
      * Initialize a newly created object.
@@ -39,25 +39,19 @@ public:
      */
     Item(const void* theKey, uint16_t numKey, uint32_t numValue,
          uint32_t flgs, rel_time_t expt) :
-        key(static_cast<const char*>(theKey), numKey)
+        key(static_cast<const char*>(theKey), numKey),
+        exptime(static_cast<rel_time_t>(expt)), flags(flgs), value(), cas(0)
     {
-        nkey = numKey;
-        nbytes = numValue;
-        exptime = (rel_time_t)expt;
-        flags = (uint32_t)flgs;
-        value.resize(nbytes);
+        value.resize(numValue);
     }
 
     /**
      * Initialize a newly created object from another object
      * @param other the other item to "clone"
      */
-    Item(const Item &other) : key(other.key), value(other.value)
+    Item(const Item &other) : key(other.key), exptime(other.exptime),
+                              flags(other.flags), value(other.value), cas(other.cas)
     {
-        nkey = other.nkey;
-        nbytes = other.nbytes;
-        exptime = other.exptime;
-        flags = other.flags;
     }
 
     /**
@@ -110,7 +104,6 @@ public:
         val.resize(val.length() - 2);
         val.append(value);
         value = val;
-        nbytes = static_cast<uint32_t>(value.length());
     }
 
     /**
@@ -120,7 +113,6 @@ public:
     void prepend(Item *other) {
         value.resize(value.length() - 2);
         value.append(other->value);
-        nbytes = value.length();
     }
 
 private:
@@ -129,9 +121,11 @@ private:
      * to call all of the get/set methods
      */
     friend class STLEngine;
-
     /** The key identifying the object */
     std::string key;
+    rel_time_t exptime; /**< When the item will expire (relative to process
+                         * startup) */
+    uint32_t flags; /**< Flags associated with the item (in network byte order)*/
     /** The items value */
     std::string value;
     /** The uniqe id for the item */
@@ -184,10 +178,13 @@ public:
     /**
      * Remove (aka delete) an object from the cache
      * @param cookie not used
-     * @param item the item to remove
+     * @param key the key for the item to remove
+     * @param nkey length of key
+     * @param cas cas id to remove
      * @return ENGINE_SUCCESS on success
      */
-    ENGINE_ERROR_CODE Remove(const void* cookie, item* item);
+    ENGINE_ERROR_CODE Remove(const void* cookie, const void *key, const size_t nkey,
+                             uint64_t cas);
 
     /**
      * Release an object (the frontend doesn't need it anymore)
@@ -272,17 +269,24 @@ public:
      */
     void ResetStats(const void *cookie);
 
-    /**
-     * Handle an unknown command
-     * This is not implemented
-     * @param cookie not used
-     * @param request not used
-     * @param response not used
-     * @return ENGINE_NOTSUP always
-     */
-    ENGINE_ERROR_CODE Unknown(const void* cookie,
-                              protocol_binary_request_header *request,
-                              ADD_RESPONSE response);
+    bool getItemInfo(const Item* it, item_info *item_info)
+    {
+        if (item_info->nvalue < 1) {
+            return false;
+        }
+        item_info->cas = it->cas;
+        item_info->exptime = it->exptime;
+        item_info->nbytes = it->value.size();
+        item_info->flags = it->flags;
+        item_info->clsid = 0;
+        item_info->nkey = it->key.size();
+        item_info->nvalue = 1;
+        item_info->key = it->key.c_str();
+        item_info->value[0].iov_base = const_cast<char*>(it->value.c_str());
+        item_info->value[0].iov_len = it->value.length();
+        return true;
+
+    }
 
 private:
     /** Handle to the server API */
