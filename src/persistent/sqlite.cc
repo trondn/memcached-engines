@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <string>
 #include <map>
+#include <string.h>
 
 class SQLite {
 public:
@@ -337,8 +338,8 @@ protected:
                 queue.erase(queue.begin());
                 unlock();
                 bool success = readItem(key, cookie);
-                engine->server.notify_io_complete(cookie,
-                                                  success ? ENGINE_SUCCESS : ENGINE_KEY_ENOENT);
+                engine->server.cookie->notify_io_complete(cookie,
+                                                          success ? ENGINE_SUCCESS : ENGINE_KEY_ENOENT);
                 lock();
             }
         }

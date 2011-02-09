@@ -33,14 +33,16 @@ static ENGINE_ERROR_CODE persistent_item_delete(ENGINE_HANDLE* handle,
                                                 const void* cookie,
                                                 const void* key,
                                                 const size_t nkey,
-                                                uint64_t cas);
+                                                uint64_t cas,
+                                                uint16_t vbucket);
 static void persistent_item_release(ENGINE_HANDLE* handle, const void *cookie,
                                     item* item);
 static ENGINE_ERROR_CODE persistent_get(ENGINE_HANDLE* handle,
                                         const void* cookie,
                                         item** item,
                                         const void* key,
-                                        const int nkey);
+                                        const int nkey,
+                                        uint16_t vbucket);
 static ENGINE_ERROR_CODE persistent_get_stats(ENGINE_HANDLE* handle,
                                               const void *cookie,
                                               const char *stat_key,
@@ -51,7 +53,8 @@ static ENGINE_ERROR_CODE persistent_store(ENGINE_HANDLE* handle,
                                           const void *cookie,
                                           item* item,
                                           uint64_t *cas,
-                                          ENGINE_STORE_OPERATION operation);
+                                          ENGINE_STORE_OPERATION operation,
+                                          uint16_t vbucket);
 static ENGINE_ERROR_CODE persistent_arithmetic(ENGINE_HANDLE* handle,
                                                const void* cookie,
                                                const void* key,
@@ -62,7 +65,8 @@ static ENGINE_ERROR_CODE persistent_arithmetic(ENGINE_HANDLE* handle,
                                                const uint64_t initial,
                                                const rel_time_t exptime,
                                                uint64_t *cas,
-                                               uint64_t *result);
+                                               uint64_t *result,
+                                               uint16_t vbucket);
 static ENGINE_ERROR_CODE persistent_flush(ENGINE_HANDLE* handle,
                                           const void* cookie, time_t when);
 static ENGINE_ERROR_CODE initalize_configuration(struct persistent_engine *se,
@@ -73,13 +77,13 @@ static ENGINE_ERROR_CODE persistent_unknown_command(ENGINE_HANDLE* handle,
                                                     protocol_binary_request_header *request,
                                                     ADD_RESPONSE response);
 
-static bool get_item_info(ENGINE_HANDLE *handle, const item* item, item_info *item_info);
+static bool get_item_info(ENGINE_HANDLE *handle, const void *cookie, const item* item, item_info *item_info);
 
 
 ENGINE_ERROR_CODE create_instance(uint64_t interface,
                                   GET_SERVER_API get_server_api,
                                   ENGINE_HANDLE **handle) {
-    SERVER_HANDLE_V1 *api = get_server_api(1);
+    SERVER_HANDLE_V1 *api = get_server_api();
     if (interface != 1 || api == NULL) {
         return ENGINE_ENOTSUP;
     }
@@ -108,7 +112,7 @@ ENGINE_ERROR_CODE create_instance(uint64_t interface,
             .flush = persistent_flush,
             .unknown_command = persistent_unknown_command,
             .item_set_cas = item_set_cas,
-            .get_item_info = get_item_info
+            .get_item_info = get_item_info,
         },
         .server = *api,
         .initialized = true,
@@ -169,7 +173,7 @@ static const engine_info* persistent_get_info(ENGINE_HANDLE* handle) {
     info.engine_info.features[1].feature = ENGINE_FEATURE_PERSISTENT_STORAGE;
     info.engine_info.features[2].feature = ENGINE_FEATURE_CAS;
 
-    return &info;
+    return &info.engine_info;
 }
 
 static ENGINE_ERROR_CODE persistent_initialize(ENGINE_HANDLE* handle,
@@ -243,10 +247,11 @@ static ENGINE_ERROR_CODE persistent_item_delete(ENGINE_HANDLE* handle,
                                                 const void* cookie,
                                                 const void* key,
                                                 const size_t nkey,
-                                                uint64_t cas) {
+                                                uint64_t cas,
+                                                uint16_t vbucket) {
 
     item* it;
-    if (persistent_get(handle, cookie, &it, key, nkey) == ENGINE_SUCCESS) {
+    if (persistent_get(handle, cookie, &it, key, nkey, vbucket) == ENGINE_SUCCESS) {
         item_unlink(get_handle(handle), get_real_item(it));
         item_release(get_handle(handle), get_real_item(it));
     }
@@ -263,7 +268,8 @@ static ENGINE_ERROR_CODE persistent_get(ENGINE_HANDLE* handle,
                                         const void* cookie,
                                         item** item,
                                         const void* key,
-                                        const int nkey) {
+                                        const int nkey,
+                                        uint16_t vbucket) {
     struct persistent_engine* engine = get_handle(handle);
     hash_item *it = item_get(engine, key, nkey);
     if (it != NULL) {
@@ -315,7 +321,8 @@ static ENGINE_ERROR_CODE persistent_store(ENGINE_HANDLE* handle,
                                           const void *cookie,
                                           item* item,
                                           uint64_t *cas,
-                                          ENGINE_STORE_OPERATION operation) {
+                                          ENGINE_STORE_OPERATION operation,
+                                          uint16_t vbucket) {
     return store_item(get_handle(handle), get_real_item(item), cas, operation,
                       true, cookie);
 }
@@ -330,7 +337,8 @@ static ENGINE_ERROR_CODE persistent_arithmetic(ENGINE_HANDLE* handle,
                                                const uint64_t initial,
                                                const rel_time_t exptime,
                                                uint64_t *cas,
-                                               uint64_t *result) {
+                                               uint64_t *result,
+                                               uint16_t vbucket) {
     ENGINE_ERROR_CODE ret = ENGINE_SUCCESS;
     struct persistent_engine *engine = get_handle(handle);
     hash_item *item = item_get(engine, key, nkey);
@@ -353,7 +361,7 @@ static ENGINE_ERROR_CODE persistent_arithmetic(ENGINE_HANDLE* handle,
                 item_release(engine, item);
                 return persistent_arithmetic(handle, cookie, key, nkey, increment,
                                              create, delta, initial, exptime, cas,
-                                             result);
+                                             result, vbucket);
             }
 
             *result = initial;
@@ -427,7 +435,7 @@ static ENGINE_ERROR_CODE initalize_configuration(struct persistent_engine *se,
             { .key = NULL}
         };
 
-        ret = se->server.parse_config(cfg_str, items, stderr);
+        ret = se->server.core->parse_config(cfg_str, items, stderr);
     }
 
     return ENGINE_SUCCESS;
@@ -456,7 +464,8 @@ uint64_t item_get_cas(const hash_item* item)
     return 0;
 }
 
-void item_set_cas(ENGINE_HANDLE* handle, item* item, uint64_t val)
+void item_set_cas(ENGINE_HANDLE* handle, const void *cookie,
+                  item* item, uint64_t val)
 {
     hash_item *it = get_real_item(item);
     if (it->iflag & ITEM_WITH_CAS) {
@@ -484,7 +493,8 @@ uint8_t item_get_clsid(const hash_item* item)
     return 0;
 }
 
-static bool get_item_info(ENGINE_HANDLE *handle, const item* item, item_info *item_info)
+static bool get_item_info(ENGINE_HANDLE *handle, const void *cookie,
+                          const item* item, item_info *item_info)
 {
     hash_item* it = (hash_item*)item;
     if (item_info->nvalue < 1) {

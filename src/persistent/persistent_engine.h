@@ -61,7 +61,7 @@ struct config {
     char *dbname;
 };
 
-EXPORT_FUNCTION
+MEMCACHED_PUBLIC_API
 ENGINE_ERROR_CODE create_instance(uint64_t interface,
                                   GET_SERVER_API get_server_api,
                                   ENGINE_HANDLE **handle);
@@ -86,7 +86,8 @@ struct engine_stats {
 struct persistent_engine {
     ENGINE_HANDLE_V1 engine;
     SERVER_HANDLE_V1 server;
-
+    GET_SERVER_API get_server_api;
+    
     /* Handle to the reader and writer classes. The rest of the code is in C
      * so let's just use a void pointer :-)
      */
@@ -114,7 +115,7 @@ struct persistent_engine {
 
 char* item_get_data(const hash_item* item);
 const char* item_get_key(const hash_item* item);
-void item_set_cas(ENGINE_HANDLE *handle, item* item, uint64_t val);
+void item_set_cas(ENGINE_HANDLE *handle, const void *cookie, item* item, uint64_t val);
 uint64_t item_get_cas(const hash_item* item);
 uint8_t item_get_clsid(const hash_item* item);
 
