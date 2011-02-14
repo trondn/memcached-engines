@@ -24,7 +24,7 @@ persistent_engine_la_SOURCES = \
                  src/persistent/slabs.c src/persistent/slabs.h \
                  src/persistent/sqlite.cc src/persistent/sqlite.h
 
-compress_engine_la_LDFLAGS = -module -dynamic ${LIBSQLITE3}
+compress_engine_la_LDFLAGS = -module -dynamic ${LIBZ}
 compress_engine_la_CFLAGS = ${NO_ERROR}
 compress_engine_la_SOURCES = \
                  src/compress/assoc.c src/compress/assoc.h \
