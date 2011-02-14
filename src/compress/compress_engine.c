@@ -28,7 +28,8 @@ static ENGINE_ERROR_CODE default_item_delete(ENGINE_HANDLE* handle,
                                              const void* cookie,
                                              const void* key,
                                              const size_t nkey,
-                                             uint64_t cas);
+                                             uint64_t cas,
+											 uint16_t vbucket);
 
 static void default_item_release(ENGINE_HANDLE* handle, const void *cookie,
                                  item* item);
@@ -36,7 +37,8 @@ static ENGINE_ERROR_CODE default_get(ENGINE_HANDLE* handle,
                                      const void* cookie,
                                      item** item,
                                      const void* key,
-                                     const int nkey);
+                                     const int nkey,
+									 uint16_t vbucket);
 static ENGINE_ERROR_CODE default_get_stats(ENGINE_HANDLE* handle,
                   const void *cookie,
                   const char *stat_key,
@@ -47,7 +49,8 @@ static ENGINE_ERROR_CODE default_store(ENGINE_HANDLE* handle,
                                        const void *cookie,
                                        item* item,
                                        uint64_t *cas,
-                                       ENGINE_STORE_OPERATION operation);
+                                       ENGINE_STORE_OPERATION operation,
+									   uint16_t vbucket);
 static ENGINE_ERROR_CODE default_arithmetic(ENGINE_HANDLE* handle,
                                             const void* cookie,
                                             const void* key,
@@ -58,7 +61,8 @@ static ENGINE_ERROR_CODE default_arithmetic(ENGINE_HANDLE* handle,
                                             const uint64_t initial,
                                             const rel_time_t exptime,
                                             uint64_t *cas,
-                                            uint64_t *result);
+                                            uint64_t *result,
+											uint16_t vbucket);
 static ENGINE_ERROR_CODE default_flush(ENGINE_HANDLE* handle,
                                        const void* cookie, time_t when);
 static ENGINE_ERROR_CODE initalize_configuration(struct compress_engine *se,
@@ -68,12 +72,12 @@ static ENGINE_ERROR_CODE default_unknown_command(ENGINE_HANDLE* handle,
                                                  protocol_binary_request_header *request,
                                                  ADD_RESPONSE response);
 
-static bool get_item_info(ENGINE_HANDLE *handle, const item* item, item_info *item_info);
+static bool get_item_info(ENGINE_HANDLE *handle, const void *cookie, const item* item, item_info *item_info);
 
 ENGINE_ERROR_CODE create_instance(uint64_t interface,
                                   GET_SERVER_API get_server_api,
                                   ENGINE_HANDLE **handle) {
-   SERVER_HANDLE_V1 *api = get_server_api(server_handle_v1);
+   SERVER_HANDLE_V1 *api = get_server_api();
    if (interface != 1 || api == NULL) {
       return ENGINE_ENOTSUP;
    }
@@ -228,7 +232,8 @@ static ENGINE_ERROR_CODE default_item_delete(ENGINE_HANDLE* handle,
                                              const void* cookie,
                                              const void* key,
                                              const size_t nkey,
-                                             uint64_t cas)
+                                             uint64_t cas,
+											 uint16_t vbucket)
 {
    struct compress_engine* engine = get_handle(handle);
    hash_item *it = item_get(engine, key, nkey);
@@ -256,7 +261,8 @@ static ENGINE_ERROR_CODE default_get(ENGINE_HANDLE* handle,
                                      const void* cookie,
                                      item** item,
                                      const void* key,
-                                     const int nkey) {
+                                     const int nkey,
+									 uint16_t vbucket) {
    *item = item_get(get_handle(handle), key, nkey);
    if (*item != NULL) {
       return ENGINE_SUCCESS;
@@ -309,7 +315,8 @@ static ENGINE_ERROR_CODE default_store(ENGINE_HANDLE* handle,
                                        const void *cookie,
                                        item* item,
                                        uint64_t *cas,
-                                       ENGINE_STORE_OPERATION operation) {
+                                       ENGINE_STORE_OPERATION operation,
+									   uint16_t vbucket) {
     if (operation == OPERATION_APPEND || operation == OPERATION_PREPEND) {
         return ENGINE_ENOTSUP;
     }
@@ -327,7 +334,8 @@ static ENGINE_ERROR_CODE default_arithmetic(ENGINE_HANDLE* handle,
                                             const uint64_t initial,
                                             const rel_time_t exptime,
                                             uint64_t *cas,
-                                            uint64_t *result) {
+                                            uint64_t *result,
+											uint16_t vbucket) {
     return ENGINE_ENOTSUP;
 }
 
@@ -384,7 +392,7 @@ static ENGINE_ERROR_CODE initalize_configuration(struct compress_engine *se,
          { .key = NULL}
       };
 
-      ret = se->server.parse_config(cfg_str, items, stderr);
+      ret = se->server.core->parse_config(cfg_str, items, stderr);
    }
 
    return ENGINE_SUCCESS;
@@ -413,7 +421,8 @@ uint64_t item_get_cas(const hash_item* item)
     return 0;
 }
 
-void item_set_cas(ENGINE_HANDLE *handle, item* item, uint64_t val)
+void item_set_cas(ENGINE_HANDLE *handle, const void *cookie,
+				  item* item, uint64_t val)
 {
     hash_item* it = get_real_item(item);
     if (it->iflag & ITEM_WITH_CAS) {
@@ -441,7 +450,8 @@ uint8_t item_get_clsid(const hash_item* item)
     return 0;
 }
 
-static bool get_item_info(ENGINE_HANDLE *handle, const item* item, item_info *item_info)
+static bool get_item_info(ENGINE_HANDLE *handle, const void *cookie,
+                          const item* item, item_info *item_info)
 {
     hash_item* it = (hash_item*)item;
     if (item_info->nvalue < 1) {
