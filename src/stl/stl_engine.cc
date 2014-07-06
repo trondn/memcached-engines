@@ -22,14 +22,14 @@
  *
  */
 extern "C" {
-    EXPORT_FUNCTION
+    MEMCACHED_PUBLIC_API
     ENGINE_ERROR_CODE create_instance(uint64_t interface,
                                       GET_SERVER_API get_server_api,
                                       ENGINE_HANDLE **handle) {
         SERVER_HANDLE_V1 *api;
 
         if (interface != 1 ||
-            (api = static_cast<SERVER_HANDLE_V1 *>(get_server_api(server_handle_v1))) == NULL) {
+            (api = static_cast<SERVER_HANDLE_V1 *>(get_server_api())) == NULL) {
             return ENGINE_ENOTSUP;
         }
 
@@ -85,7 +85,8 @@ extern "C" {
                                         const void* cookie,
                                         const void* key,
                                         const size_t nkey,
-                                        uint64_t cas)
+                                        uint64_t cas,
+                                        uint16_t vbucket)
     {
         return reinterpret_cast<STLEngine*>(handle)->Remove(cookie, key, nkey, cas);
     }
@@ -100,7 +101,8 @@ extern "C" {
                                      const void* cookie,
                                      item** item,
                                      const void* key,
-                                     const int nkey)
+                                     const int nkey,
+                                     uint16_t vbucket)
     {
         return reinterpret_cast<STLEngine*>(handle)->Get(cookie, item, key, nkey);
     }
@@ -109,7 +111,8 @@ extern "C" {
                                        const void *cookie,
                                        item* item,
                                        uint64_t *cas,
-                                       ENGINE_STORE_OPERATION operation)
+                                       ENGINE_STORE_OPERATION operation,
+                                       uint16_t vbucket)
     {
         return reinterpret_cast<STLEngine*>(handle)->Store(cookie, item, cas, operation);
     }
@@ -124,7 +127,8 @@ extern "C" {
                                             const uint64_t initial,
                                             const rel_time_t exptime,
                                             uint64_t *cas,
-                                            uint64_t *result)
+                                            uint64_t *result,
+                                            uint16_t vbucket)
     {
         return reinterpret_cast<STLEngine*>(handle)->Arithmetic(cookie, key, nkey, increment, create, delta, initial, exptime, cas, result);
     }
@@ -149,13 +153,15 @@ extern "C" {
         return reinterpret_cast<STLEngine*>(handle)->ResetStats(cookie);
     }
 
-    static bool stl_get_item_info(ENGINE_HANDLE *handle, const item* item, item_info *item_info)
+    static bool stl_get_item_info(ENGINE_HANDLE *handle, const void *cookie,
+                                  const item* item, item_info *item_info)
     {
         return reinterpret_cast<STLEngine*>(handle)->getItemInfo(reinterpret_cast<const Item*>(item),
                                                                  item_info);
     }
 
-    static void stl_item_set_cas(ENGINE_HANDLE *handle, item *item, uint64_t cas)
+    static void stl_item_set_cas(ENGINE_HANDLE *handle, const void *cookie,
+                                 item *item, uint64_t cas)
     {
         (void)handle;
         reinterpret_cast<Item*>(item)->setCas(cas);
